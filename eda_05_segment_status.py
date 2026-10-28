@@ -1,89 +1,151 @@
 # eda_05_segment_status.py
-# Mục đích: kiểm tra ngoại lai vận tốc, khả năng nối bảng, và xu hướng theo thời gian
+# Mục đích: tìm hiểu bảng segment_status (vận tốc đo được theo thời gian):
+#   1. phân bố vận tốc, ngoại lai, giá trị 1 đặc biệt
+#   2. ngày đột biến và phân bố theo giờ (so sánh giờ UTC và giờ Việt Nam)
+#   3. vận tốc theo cấp đường / loại đường / giới hạn tốc độ
+# Lưu ý: updated_at đang ở giờ UTC; giờ Việt Nam = UTC + 7.
 
-import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-DATA_DIR = "data"
-FIG_DIR = "figures"
-os.makedirs(FIG_DIR, exist_ok=True)
-sns.set_theme(style="whitegrid")
+from common import load, save_fig
 
-status = pd.read_csv(f"{DATA_DIR}/segment_status.csv")
-segments = pd.read_csv(f"{DATA_DIR}/segments.csv")
-train = pd.read_csv(f"{DATA_DIR}/train.csv")
+status = load("segment_status")
+seg = load("segments")[["_id", "street_level", "street_type", "max_velocity"]].rename(
+    columns={"_id": "segment_id"})
 
-# Đổi cột thời gian (đang ở dạng chữ, múi giờ UTC) sang giờ Việt Nam (UTC+7)
-status["time"] = pd.to_datetime(status["updated_at"], utc=True).dt.tz_convert("Asia/Ho_Chi_Minh")
-status["hour"] = status["time"].dt.hour
-status["date"] = status["time"].dt.normalize().dt.tz_localize(None)  # bỏ múi giờ để vẽ cho dễ
+# ---------- Chuẩn bị thời gian ----------
+ts_utc = pd.to_datetime(status["updated_at"], utc=True).dt.tz_localize(None)  # giờ UTC
+ts_vn = ts_utc + pd.Timedelta(hours=7)                                        # giờ Việt Nam
+status["hour_utc"] = ts_utc.dt.hour
+status["hour_vn"] = ts_vn.dt.hour
+status["date_vn"] = ts_vn.dt.strftime("%Y-%m-%d")
 
-# ---------- Phần 1: ngoại lai của vận tốc ----------
-print("=== VẬN TỐC ===")
+df = status.merge(seg, on="segment_id", how="left")  # ghép thêm thông tin đường
+
+# Ngày có nhiều bản ghi nhất (theo giờ VN) coi là "ngày đột biến"
+event_date = df["date_vn"].value_counts().index[0]
+df["nhom"] = np.where(df["date_vn"] == event_date, "Ngày đột biến", "Các ngày còn lại")
+rest = df[df["nhom"] == "Các ngày còn lại"]
+
+# ---------- 1. Vận tốc: phân vị, ngoại lai, giá trị đặc biệt ----------
+print("=== 1. VẬN TỐC ===")
 print("Các phân vị:")
-print(status["velocity"].quantile([0.5, 0.9, 0.99, 0.999]).to_string())
-print("Số dòng có vận tốc > 80:", (status["velocity"] > 80).sum())
-print("Số dòng có vận tốc > 100:", (status["velocity"] > 100).sum())
+print(df["velocity"].quantile([0.5, 0.9, 0.99, 0.999]).to_string())
+print(f"Số dòng vận tốc > 80: {(df['velocity'] > 80).sum()}; > 100: {(df['velocity'] > 100).sum()}; "
+      f"= 200: {(df['velocity'] == 200).sum()}")
 print("10 giá trị vận tốc xuất hiện nhiều nhất:")
-print(status["velocity"].value_counts().head(10).to_string())
+print(df["velocity"].value_counts().head(10).to_string())
 print()
 
-# ---------- Phần 2: kiểm tra khả năng nối bảng ----------
-print("=== NỐI BẢNG ===")
-ids_status = set(status["segment_id"].unique())
-print("Số đoạn đường khác nhau trong segment_status:", len(ids_status))
-print("  trong đó có mặt ở segments.csv:", len(ids_status & set(segments["_id"])))
-print("  trong đó có mặt ở train.csv:", len(ids_status & set(train["segment_id"])))
+# ---------- 2. Ngày đột biến ----------
+ev = df[df["nhom"] == "Ngày đột biến"]
+print("=== 2. NGÀY ĐỘT BIẾN ===")
+print(f"Ngày nhiều bản ghi nhất (giờ VN): {event_date}: {len(ev):,}/{len(df):,} bản ghi "
+      f"({len(ev) / len(df) * 100:.1f}%), {ev['segment_id'].nunique():,} đoạn đường khác nhau")
+print("Bản ghi của ngày này theo giờ VN:")
+print(ev["hour_vn"].value_counts().sort_index().to_string())
+print("Top 3 ngày nhiều bản ghi nhất theo giờ UTC (để đối chiếu):")
+print(ts_utc.dt.strftime("%Y-%m-%d").value_counts().head(3).to_string())
+print()
+print(f"Tỉ lệ velocity = 1: ngày đột biến {(ev['velocity'] == 1).mean() * 100:.1f}%; "
+      f"các ngày còn lại {(rest['velocity'] == 1).mean() * 100:.1f}%")
+print("Tỉ lệ velocity = 1 (%) theo street_level (các ngày còn lại):")
+share1 = rest.assign(mot=(rest["velocity"] == 1)).groupby("street_level")["mot"].mean() * 100
+print(share1.round(1).to_string())
 print()
 
-# Ghép thêm loại đường và vận tốc tối đa từ segments vào status
-seg = segments[["_id", "street_type", "max_velocity"]].rename(columns={"_id": "segment_id"})
-merged = status.merge(seg, on="segment_id", how="left")
-
-print("Vận tốc trung bình theo loại đường (chỉ in các loại có > 500 dòng):")
-by_type = merged.groupby("street_type")["velocity"].agg(["mean", "size"])
-print(by_type[by_type["size"] > 500].sort_values("mean", ascending=False).round(2).to_string())
+# ---------- 3. Số bản ghi trên mỗi đoạn đường ----------
+print("=== 3. SỐ BẢN GHI TRÊN MỖI ĐOẠN ===")
+print(df["segment_id"].value_counts().describe().round(1).to_string())
+print("5 đoạn nhiều bản ghi nhất:")
+print(df["segment_id"].value_counts().head(5).to_string())
 print()
 
-has_max = merged["max_velocity"].notna()
-over = (merged.loc[has_max, "velocity"] > merged.loc[has_max, "max_velocity"]).sum()
-print(f"Số dòng có max_velocity: {has_max.sum()}; trong đó vận tốc vượt max_velocity: {over}")
+# ---------- 4. Bản ghi theo giờ: UTC và Việt Nam ----------
+h = pd.DataFrame({
+    "UTC_tatca": df["hour_utc"].value_counts(),
+    "VN_tatca": df["hour_vn"].value_counts(),
+    "UTC_bo_dotbien": rest["hour_utc"].value_counts(),
+    "VN_bo_dotbien": rest["hour_vn"].value_counts(),
+}).reindex(range(24)).fillna(0).astype(int)
+print("=== 4. SỐ BẢN GHI THEO GIỜ (0-23) ===")
+print(h.to_string())
 print()
 
-# ---------- Phần 3: thời gian ----------
-print("=== THỜI GIAN ===")
-print("Khoảng thời gian của segment_status:", status["time"].min(), "->", status["time"].max())
-print("Số ngày khác nhau:", status["date"].nunique())
+# ---------- 5. Vận tốc theo loại đường (bỏ ngày đột biến) ----------
+print("=== 5. VẬN TỐC THEO ĐƯỜNG (bỏ ngày đột biến) ===")
+print("Theo street_level:")
+print(rest.groupby("street_level")["velocity"].agg(["median", "mean", "size"]).round(1).to_string())
+g = rest.groupby("street_type")["velocity"].agg(["median", "mean", "size"])
+top_types = g[g["size"] > 500].sort_values("size", ascending=False)
+print("Theo street_type (chỉ loại có > 500 dòng):")
+print(top_types.round(1).to_string())
+r = rest[rest["max_velocity"].notna()].copy()
+r["ti_le"] = r["velocity"] / r["max_velocity"]
+print(f"Số dòng có max_velocity: {len(r):,}; vận tốc vượt giới hạn: {(r['ti_le'] > 1).sum():,} "
+      f"({(r['ti_le'] > 1).mean() * 100:.1f}%)")
 print()
 
-# ---------- Biểu đồ 9: vận tốc trung bình theo giờ trong ngày ----------
-by_hour = status.groupby("hour")["velocity"].agg(["mean", "median", "size"])
-fig, ax1 = plt.subplots(figsize=(10, 4))
-ax1.plot(by_hour.index, by_hour["mean"], marker="o", label="Trung bình")
-ax1.plot(by_hour.index, by_hour["median"], marker="s", label="Trung vị")
-ax1.set_xlabel("Giờ trong ngày (giờ Việt Nam)")
-ax1.set_ylabel("Vận tốc")
-ax1.set_xticks(range(0, 24))
-ax1.legend()
-plt.title("Vận tốc theo giờ trong ngày (segment_status)")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/09_van_toc_theo_gio.png", dpi=120)
-plt.close()
+# ================= BIỂU ĐỒ =================
 
-# ---------- Biểu đồ 10: số bản ghi mỗi ngày ----------
-per_day = status.groupby("date").size()
-plt.figure(figsize=(12, 4))
-plt.plot(per_day.index, per_day.values, ".", markersize=4)
-plt.title("Số bản ghi segment_status theo ngày")
-plt.xlabel("Ngày")
-plt.ylabel("Số bản ghi")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/10_so_ban_ghi_theo_ngay.png", dpi=120)
-plt.close()
+# --- Biểu đồ 1: số bản ghi theo ngày (trục y dạng log) ---
+per_day = df["date_vn"].value_counts().sort_index()
+fig, ax = plt.subplots(figsize=(12, 4))
+ax.plot(pd.to_datetime(per_day.index), per_day.values, ".", markersize=6)
+ax.set_yscale("log")
+for i, d in enumerate(df["date_vn"].value_counts().head(3).index):
+    ax.annotate(d, (pd.to_datetime(d), per_day[d]), textcoords="offset points", xytext=(8, -4 - 11 * i))
+ax.set_title("Số bản ghi segment_status theo ngày (giờ VN, trục y dạng log)")
+ax.set_xlabel("Ngày")
+ax.set_ylabel("Số bản ghi (log)")
+save_fig("05_ban_ghi_theo_ngay.png")
 
-print("Số bản ghi mỗi giờ (để biết giờ nào ít dữ liệu):")
-print(by_hour["size"].to_string())
-print()
-print("Đã lưu 2 biểu đồ vào thư mục figures/")
+# --- Biểu đồ 2: số bản ghi theo giờ, so sánh UTC và VN ---
+fig, axes = plt.subplots(1, 2, figsize=(15, 4))
+for ax, (tieu_de, cols) in zip(axes, [("Tất cả", ["UTC_tatca", "VN_tatca"]),
+                                       ("Bỏ ngày đột biến", ["UTC_bo_dotbien", "VN_bo_dotbien"])]):
+    bang = h[cols].copy()
+    bang.columns = ["Giờ UTC", "Giờ VN (UTC+7)"]
+    bang.plot(kind="bar", ax=ax, width=0.85)
+    ax.set_title(f"Số bản ghi theo giờ: {tieu_de}")
+    ax.set_xlabel("Giờ trong ngày")
+    ax.set_ylabel("Số bản ghi")
+save_fig("05_ban_ghi_theo_gio.png")
+
+# --- Biểu đồ 3: vận tốc theo cấp đường và loại đường ---
+fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+sns.boxplot(data=rest, x="street_level", y="velocity", showfliers=False, ax=axes[0])
+axes[0].set_title("Vận tốc theo cấp đường (bỏ ngày đột biến)")
+axes[0].set_xlabel("street_level")
+axes[0].set_ylabel("velocity")
+sns.boxplot(data=rest[rest["street_type"].isin(top_types.index)], x="street_type", y="velocity",
+            order=top_types.index.tolist(), showfliers=False, ax=axes[1])
+axes[1].set_title("Vận tốc theo loại đường (loại có > 500 dòng)")
+axes[1].set_xlabel("street_type")
+axes[1].tick_params(axis="x", rotation=30)
+save_fig("05_van_toc_theo_duong.png")
+
+# --- Biểu đồ 4: vận tốc so với giới hạn tốc độ ---
+plt.figure(figsize=(9, 4))
+sns.histplot(r[r["ti_le"] <= 2], x="ti_le", bins=40)
+plt.axvline(1, color="red", linestyle="--", label="Bằng giới hạn")
+plt.legend()
+plt.title("Vận tốc / giới hạn tốc độ (chỉ đoạn có max_velocity, tỉ lệ ≤ 2)")
+plt.xlabel("velocity / max_velocity")
+plt.ylabel("Số dòng")
+save_fig("05_van_toc_so_voi_gioi_han.png")
+
+# --- Biểu đồ 5: tỉ lệ velocity = 1 theo cấp đường ---
+plt.figure(figsize=(7, 4))
+ax = share1.plot(kind="bar", label="Tỉ lệ velocity = 1")
+ax.bar_label(ax.containers[0], fmt="%.1f%%")
+plt.axhline((rest["velocity"] == 1).mean() * 100, color="red", linestyle="--", label="Trung bình chung")
+plt.legend()
+plt.title("Tỉ lệ velocity = 1 theo cấp đường (bỏ ngày đột biến)")
+plt.xlabel("street_level")
+plt.ylabel("Tỉ lệ (%)")
+plt.xticks(rotation=0)
+save_fig("05_velocity_bang_1.png")

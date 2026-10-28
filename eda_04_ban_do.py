@@ -1,72 +1,91 @@
 # eda_04_ban_do.py
-# Mục đích: vẽ bản đồ các nút giao và các đoạn đường tô màu theo mức ùn tắc
+# Mục đích: xem dữ liệu trên BẢN ĐỒ (không gian):
+#   1. các nút giao (nodes.csv)
+#   2. đoạn đường nào có trong train (phạm vi phủ so với toàn mạng lưới)
+#   3. mức ùn tắc LOS trung bình của từng đoạn (bỏ 2 ngày đột biến),
+#      so sánh "mọi đoạn" với "chỉ đoạn có từ 3 dòng trở lên" để thấy độ tin cậy
 
-import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-DATA_DIR = "data"
-FIG_DIR = "figures"
-os.makedirs(FIG_DIR, exist_ok=True)
+from common import LOS_ORDER, load, save_fig
 
-nodes = pd.read_csv(f"{DATA_DIR}/nodes.csv")
-segments = pd.read_csv(f"{DATA_DIR}/segments.csv")
-train = pd.read_csv(f"{DATA_DIR}/train.csv")
+nodes = load("nodes")
+segments = load("segments")
+train = load("train")
+train["los_num"] = train["LOS"].map({c: i for i, c in enumerate(LOS_ORDER)})  # A=0 ... F=5
 
-# ---------- Biểu đồ 7: bản đồ tất cả các nút giao ----------
-# Mỗi chấm là 1 nút (kinh độ = trục x, vĩ độ = trục y).
-# Chấm rất nhỏ (s=0.05) vì có gần 578 nghìn nút.
+# 2 ngày có nhiều dòng bất thường (đã tìm thấy ở cột mốc 3) -> loại ra khi tính LOS trung bình
+top2 = train["date"].value_counts().head(2).index.tolist()
+rest = train[~train["date"].isin(top2)]
+print(f"Bỏ 2 ngày đột biến {top2}: còn {len(rest):,}/{len(train):,} dòng")
+
+# Khung nhìn chung cho mọi bản đồ: lấy theo phạm vi toạ độ của nodes
+XLIM = (nodes["long"].min(), nodes["long"].max())
+YLIM = (nodes["lat"].min(), nodes["lat"].max())
+
+
+def dinh_dang_ban_do(ax):
+    """Đặt khung nhìn chung và giữ tỉ lệ x:y để bản đồ không bị méo."""
+    ax.set_xlim(*XLIM)
+    ax.set_ylim(*YLIM)
+    ax.set_aspect("equal")
+    ax.set_xlabel("Kinh độ")
+    ax.set_ylabel("Vĩ độ")
+
+
+# ---------- 1. Bản đồ các nút giao ----------
 fig, ax = plt.subplots(figsize=(9, 9))
 ax.scatter(nodes["long"], nodes["lat"], s=0.05, alpha=0.4, color="steelblue", rasterized=True)
-ax.set_aspect("equal")  # giữ tỉ lệ x:y để bản đồ không bị méo
 ax.set_title("Vị trí các nút giao (nodes.csv)")
-ax.set_xlabel("Kinh độ")
-ax.set_ylabel("Vĩ độ")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/07_ban_do_nodes.png", dpi=130)
-plt.close()
+dinh_dang_ban_do(ax)
+save_fig("04_ban_do_nodes.png")
 
-# ---------- Biểu đồ 8: các đoạn đường trong train, tô màu theo LOS ----------
-# Đổi chữ cái LOS thành số để tính trung bình: A=0, B=1, ..., F=5
-train["los_num"] = train["LOS"].map({c: i for i, c in enumerate("ABCDEF")})
+# ---------- Chuẩn bị toạ độ cho TẤT CẢ đoạn đường ----------
+# Mỗi đoạn là 1 đoạn thẳng nối nút đầu -> nút cuối; lấy toạ độ từ nodes theo s_node_id / e_node_id
+nd = nodes.set_index("_id")[["long", "lat"]]
+s_xy = nd.reindex(segments["s_node_id"]).to_numpy()
+e_xy = nd.reindex(segments["e_node_id"]).to_numpy()
+lines_all = np.stack([s_xy, e_xy], axis=1)  # hình dạng (số đoạn, 2 điểm, 2 toạ độ)
+pos = pd.Series(np.arange(len(segments)), index=segments["_id"])  # segment_id -> vị trí trong lines_all
 
-# Mỗi segment_id lấy 1 dòng: toạ độ đầu/cuối và mức LOS trung bình
-seg = train.groupby("segment_id").agg(
-    long_s=("long_snode", "first"), lat_s=("lat_snode", "first"),
-    long_e=("long_enode", "first"), lat_e=("lat_enode", "first"),
-    los_mean=("los_num", "mean"),
-    so_dong=("los_num", "size"),
-).reset_index()
-
-# Mỗi đoạn đường là 1 đoạn thẳng nối (nút đầu) -> (nút cuối)
-lines = [[(r.long_s, r.lat_s), (r.long_e, r.lat_e)] for r in seg.itertuples()]
-lc = LineCollection(lines, array=seg["los_mean"].values, cmap="RdYlGn_r", linewidths=1.5)
-lc.set_clim(0, 5)
+# ---------- 2. Phạm vi phủ của train ----------
+in_train = segments["_id"].isin(train["segment_id"].unique()).to_numpy()
+print(f"Đoạn đường có trong train: {in_train.sum():,}/{len(segments):,} ({in_train.mean() * 100:.1f}%)")
 
 fig, ax = plt.subplots(figsize=(9, 9))
-ax.add_collection(lc)
-ax.autoscale()
-ax.set_aspect("equal")
-cb = fig.colorbar(lc, ax=ax, shrink=0.7)
-cb.set_ticks(range(6))
-cb.set_ticklabels(list("ABCDEF"))
-cb.set_label("LOS trung bình của đoạn đường")
-ax.set_title("Các đoạn đường trong train, tô màu theo LOS trung bình")
-ax.set_xlabel("Kinh độ")
-ax.set_ylabel("Vĩ độ")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/08_ban_do_los.png", dpi=130)
-plt.close()
+ax.add_collection(LineCollection(lines_all[~in_train], colors="lightgrey", linewidths=0.3))
+ax.add_collection(LineCollection(lines_all[in_train], colors="crimson", linewidths=0.9))
+ax.plot([], [], color="lightgrey", label="Toàn mạng lưới (không có trong train)")
+ax.plot([], [], color="crimson", label="Có trong train")
+ax.legend(loc="lower left")
+ax.set_title("Phạm vi phủ của train so với toàn mạng lưới")
+dinh_dang_ban_do(ax)
+save_fig("04_ban_do_pham_vi.png")
 
-# ---------- In số liệu để kiểm tra ----------
-print("Khoảng toạ độ của nodes:")
-print(nodes[["long", "lat"]].describe().loc[["min", "max"]].round(4).to_string())
+# ---------- 3. LOS trung bình theo từng đoạn ----------
+# Mỗi đoạn lấy LOS trung bình (A=0 ... F=5) và số dòng quan sát được (n)
+g_all = rest.groupby("segment_id").agg(los_mean=("los_num", "mean"), n=("los_num", "size"))
+print("Số dòng quan sát được trên mỗi đoạn (sau khi bỏ 2 ngày đột biến):")
+print(g_all["n"].describe().round(1).to_string())
+print(f"Số đoạn có từ 3 dòng trở lên: {(g_all['n'] >= 3).sum():,}/{len(g_all):,}")
 print()
-print("Số đoạn đường (segment_id) khác nhau trong train:", train["segment_id"].nunique())
-print("Tổng số đoạn đường trong segments.csv:", segments["_id"].nunique())
-print()
-print("Số dòng train trên mỗi đoạn đường:")
-print(seg["so_dong"].describe().round(1).to_string())
-print()
-print("Đã lưu 2 biểu đồ vào thư mục figures/")
+
+fig, axes = plt.subplots(1, 3, figsize=(19, 8), gridspec_kw={"width_ratios": [1, 1, 0.04]})
+for ax, (tieu_de, min_obs) in zip(axes[:2], [("Mọi đoạn có dữ liệu", 1),
+                                              ("Chỉ đoạn có từ 3 dòng trở lên", 3)]):
+    g = g_all[g_all["n"] >= min_obs]
+    idx = pos.reindex(g.index).to_numpy()
+    lc = LineCollection(lines_all[idx], array=g["los_mean"].to_numpy(), cmap="RdYlGn_r", linewidths=1.5)
+    lc.set_clim(0, 5)
+    ax.add_collection(lc)
+    ax.set_title(f"{tieu_de} ({len(g):,} đoạn)")
+    dinh_dang_ban_do(ax)
+cb = fig.colorbar(lc, cax=axes[2])
+cb.set_ticks(range(6))
+cb.set_ticklabels(LOS_ORDER)
+cb.set_label("LOS trung bình của đoạn đường")
+fig.suptitle("LOS trung bình theo đoạn đường (bỏ 2 ngày đột biến)")
+save_fig("04_ban_do_los.png")

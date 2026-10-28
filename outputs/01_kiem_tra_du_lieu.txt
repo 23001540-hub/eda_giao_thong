@@ -1,0 +1,111 @@
+======================================================================
+A. CẤU TRÚC TỪNG BẢNG (kiểu dữ liệu, ô thiếu, số giá trị khác nhau)
+
+--- nodes: 577,967 dòng x 3 cột
+         kieu  thieu  thieu_%  so_gia_tri_khac_nhau
+_id     int64      0      0.0                577967
+long  float64      0      0.0                474864
+lat   float64      0      0.0                444957
+
+--- streets: 5,553 dòng x 5 cột
+                 kieu  thieu  thieu_%  so_gia_tri_khac_nhau
+_id             int64      0      0.0                  5553
+level           int64      0      0.0                     4
+max_velocity  float64   4566     82.2                    11
+name              str   1605     28.9                  1048
+type              str      0      0.0                    11
+
+--- segments: 84,633 dòng x 11 cột
+                 kieu  thieu  thieu_%  so_gia_tri_khac_nhau
+_id             int64      0      0.0                 84633
+created_at        str      0      0.0                 84633
+updated_at        str      0      0.0                 84633
+s_node_id       int64      0      0.0                 52384
+e_node_id       int64      0      0.0                 52386
+length          int64      0      0.0                   526
+street_id       int64      0      0.0                  5539
+max_velocity  float64  74762     88.3                    11
+street_level    int64      0      0.0                     4
+street_name       str    152      0.2                  1388
+street_type       str      0      0.0                    53
+
+--- segment_status: 90,938 dòng x 4 cột
+             kieu  thieu  thieu_%  so_gia_tri_khac_nhau
+_id         int64      0      0.0                 90938
+updated_at    str      0      0.0                 59422
+segment_id  int64      0      0.0                 10027
+velocity    int64      0      0.0                   179
+
+--- train: 33,441 dòng x 18 cột
+                 kieu  thieu  thieu_%  so_gia_tri_khac_nhau
+_id             int64      0      0.0                 33441
+segment_id      int64      0      0.0                 10027
+date              str      0      0.0                   122
+weekday         int64      0      0.0                     7
+period            str      0      0.0                    46
+LOS               str      0      0.0                     6
+s_node_id       int64      0      0.0                  8430
+e_node_id       int64      0      0.0                  8427
+length          int64      0      0.0                   314
+street_id       int64      0      0.0                  1967
+max_velocity  float64  28495     85.2                    11
+street_level    int64      0      0.0                     4
+street_name       str      1      0.0                   695
+street_type       str      0      0.0                    26
+long_snode    float64      0      0.0                  8400
+lat_snode     float64      0      0.0                  8388
+long_enode    float64      0      0.0                  8391
+lat_enode     float64      0      0.0                  8384
+
+======================================================================
+B. DÒNG TRÙNG LẶP VÀ CỘT _id
+nodes: dòng trùng hoàn toàn = 0; _id có duy nhất = True
+streets: dòng trùng hoàn toàn = 0; _id có duy nhất = True
+segments: dòng trùng hoàn toàn = 0; _id có duy nhất = True
+segment_status: dòng trùng hoàn toàn = 0; _id có duy nhất = True
+train: dòng trùng hoàn toàn = 0; _id có duy nhất = True
+
+======================================================================
+C. KHOÁ NỐI: giá trị ở bảng con có tồn tại ở bảng cha không
+segments.s_node_id -> nodes._id: khớp 100.00% (không khớp 0 dòng)
+segments.e_node_id -> nodes._id: khớp 100.00% (không khớp 0 dòng)
+segments.street_id -> streets._id: khớp 100.00% (không khớp 0 dòng)
+segment_status.segment_id -> segments._id: khớp 100.00% (không khớp 0 dòng)
+train.segment_id -> segments._id: khớp 100.00% (không khớp 0 dòng)
+train.street_id -> streets._id: khớp 100.00% (không khớp 0 dòng)
+train.s_node_id -> nodes._id: khớp 100.00% (không khớp 0 dòng)
+train.e_node_id -> nodes._id: khớp 100.00% (không khớp 0 dòng)
+
+======================================================================
+D. train ĐƯỢC SAO CHÉP TỪ segments / nodes: các cột có khớp nhau không
+s_node_id: khớp 100.00% (lệch 0 dòng)
+e_node_id: khớp 100.00% (lệch 0 dòng)
+length: khớp 100.00% (lệch 0 dòng)
+street_id: khớp 100.00% (lệch 0 dòng)
+max_velocity: khớp 100.00% (lệch 0 dòng)
+street_level: khớp 100.00% (lệch 0 dòng)
+street_name: khớp 100.00% (lệch 0 dòng)
+street_type: khớp 100.00% (lệch 0 dòng)
+toạ độ nút đầu: khớp 100.00% (lệch 0 dòng)
+toạ độ nút cuối: khớp 100.00% (lệch 0 dòng)
+
+======================================================================
+E. KHOẢNG GIÁ TRỊ
+nodes: long 106.5360 -> 106.8680; lat 10.6760 -> 10.8890
+segments.length: nhỏ nhất 0, trung vị 27.0, lớn nhất 1622; số đoạn có length = 0: 154
+train.length: số dòng có length = 0: 57
+max_velocity (segments) các giá trị có mặt: [10.0, 20.0, 30.0, 40.0, 45.0, 50.0, 60.0, 70.0, 80.0, 100.0, 120.0]
+segment_status.velocity: nhỏ nhất 0, lớn nhất 200
+street_level (segments) các giá trị: [1, 2, 3, 4]
+LOS (train) các giá trị: ['A', 'B', 'C', 'D', 'E', 'F']
+weekday (train) các giá trị: [0, 1, 2, 3, 4, 5, 6]
+period: có 46/48 khung; thiếu: ['period_20_30', 'period_21_00']; lạ (ngoài 48 khung chuẩn): []
+
+======================================================================
+F. NHẤT QUÁN NHÃN VÀ THỜI GIAN
+train.date không đọc được thành ngày: 0 dòng
+train.weekday khớp với thứ tính từ date: 100.00%
+train: số dòng lặp cùng (segment_id, date, period): 0
+train: số cụm (segment_id, date, period) có nhãn LOS mâu thuẫn: 0
+segment_status.updated_at không đọc được thành thời gian: 0 dòng
+segment_status.updated_at: 2020-07-03 14:55:31.869000+00:00 -> 2021-04-22 06:53:27.300000+00:00
